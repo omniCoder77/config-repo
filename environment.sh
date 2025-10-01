@@ -289,18 +289,81 @@ vim.keymap.set('i', '<C-i>', '<Esc>', { noremap = true, silent = true })
 require("lazy").setup({
   spec = {
     {
+      "ms-jpq/coq_nvim",
+      branch = "coq",
+      dependencies = {
+        { "ms-jpq/coq.artifacts", branch = "artifacts" },
+        { "ms-jpq/coq.thirdparty", branch = "3p" }
+      },
+      init = function()
+        vim.g.coq_settings = {
+          auto_start = 'shut-up',
+          keymap = { recommended = true },
+          clients = {
+            lsp = {
+              enabled = true,
+              resolve_timeout = 0.06,
+            },
+            snippets = { enabled = true },
+          },
+          display = {
+            preview = {
+              border = "rounded",
+            },
+            pum = {
+              fast_close = false,
+            },
+          },
+        }
+      end,
+    },
+
+    {
       "neovim/nvim-lspconfig",
       dependencies = {
         "williamboman/mason.nvim",
         "williamboman/mason-lspconfig.nvim",
+        "ms-jpq/coq_nvim",
       },
       config = function()
         require("mason").setup()
         require("mason-lspconfig").setup({
-          ensure_installed = { "kotlin_language_server" },
+          ensure_installed = { "kotlin_language_server", "clangd" },
         })
 
-        require("lspconfig").kotlin_language_server.setup({})
+        -- IMPORTANT: Must load COQ before setting up LSP servers
+        local coq = require("coq")
+
+        -- Kotlin LSP setup
+        require("lspconfig").kotlin_language_server.setup(coq.lsp_ensure_capabilities({}))
+
+        -- Clangd LSP setup with enhanced capabilities
+        require("lspconfig").clangd.setup(coq.lsp_ensure_capabilities({
+          cmd = {
+            "clangd",
+            "--background-index",
+            "--clang-tidy",
+            "--header-insertion=iwyu",
+            "--completion-style=detailed",
+            "--function-arg-placeholders",
+            "--fallback-style=llvm",
+          },
+          filetypes = { "c", "cpp", "objc", "objcpp", "cuda", "proto" },
+          root_dir = require("lspconfig").util.root_pattern(
+            '.clangd',
+            '.clang-tidy',
+            '.clang-format',
+            'compile_commands.json',
+            'compile_flags.txt',
+            'configure.ac',
+            '.git'
+          ),
+          init_options = {
+            usePlaceholders = true,
+            completeUnimported = true,
+            clangdFileStatus = true,
+          },
+        }))
 
         vim.api.nvim_create_autocmd('LspAttach', {
           group = vim.api.nvim_create_augroup('UserLspConfig', {}),
@@ -320,8 +383,38 @@ require("lazy").setup({
             vim.keymap.set('n', '<leader>f', function()
               vim.lsp.buf.format { async = true }
             end, opts)
+            
+            -- Additional keymaps for diagnostics
+            vim.keymap.set('n', '[d', vim.diagnostic.goto_prev, opts)
+            vim.keymap.set('n', ']d', vim.diagnostic.goto_next, opts)
+            vim.keymap.set('n', '<leader>d', vim.diagnostic.open_float, opts)
           end,
         })
+
+        -- Enhanced diagnostic configuration
+        vim.diagnostic.config({
+          virtual_text = {
+            prefix = '●',
+            source = "if_many",
+          },
+          signs = true,
+          underline = true,
+          update_in_insert = false,
+          severity_sort = true,
+          float = {
+            border = 'rounded',
+            source = 'always',
+            header = '',
+            prefix = '',
+          },
+        })
+
+        -- Diagnostic signs
+        local signs = { Error = " ", Warn = " ", Hint = " ", Info = " " }
+        for type, icon in pairs(signs) do
+          local hl = "DiagnosticSign" .. type
+          vim.fn.sign_define(hl, { text = icon, texthl = hl, numhl = hl })
+        end
       end,
     },
 
@@ -333,23 +426,13 @@ require("lazy").setup({
     },
 
     {
-      "ms-jpq/coq_nvim",
-      branch = "coq",
-      config = function()
-        vim.g.coq_settings = {
-          auto_start = true,
-          keymap = { recommended = true },
-        }
-      end,
-    },
-
-    {
       "nvim-treesitter/nvim-treesitter",
       build = ":TSUpdate",
       config = function()
         require("nvim-treesitter.configs").setup({
-          ensure_installed = { "kotlin", "lua", "vim", "vimdoc", "query" },
+          ensure_installed = { "c", "cpp", "kotlin", "lua", "vim", "vimdoc", "query" },
           highlight = { enable = true },
+          indent = { enable = true },
         })
       end,
     },
